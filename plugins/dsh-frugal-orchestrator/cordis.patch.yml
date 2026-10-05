@@ -1,0 +1,309 @@
+# @nu11dev/dsh-frugal-orchestrator bundle patch.
+#
+# Inserts TWO things:
+#
+#   1. `frugal-gate` — a TOP-LEVEL row (the host half of this package). It is
+#      top-level on purpose: the Web settings document is built from
+#      `configEditor.entries()`, which keeps only direct children of an
+#      `include` entry, so a row nested inside a preset tree is never
+#      addressable and can never grow a configure page. A top-level row whose
+#      Config declares `.volatile()` fields does — with the namespace equal to
+#      the row id (`frugal-gate`), which is where the sidebar's 「插件」 panel
+#      (组合包 @nu11dev/dsh-frugal-orchestrator → 行 frugal-gate → 「配置」) reads and
+#      writes. It is NOT under 「设置」: 设置 → 内置插件 is a read-only inventory.
+#
+#   2. `preset-frugal` — the agent preset declaration 「省钱编排」 (id
+#      `frugal`, order 5).
+#
+# Why the preset carries the whole working toolset even though the top-level
+# agent must end up with three tools: a delegated child JOINS its parent's preset
+# (@deepseek-ai/dsh-subagent -> applyChildComposition -> composeFrom), so the
+# preset's child list is also the CHILD's composition. Anything omitted here is
+# omitted for the agent that is supposed to do the work. The top-level agent's
+# minimal view is therefore produced at runtime by `frugal-gate`. v0.3 also
+# denies nested delegation in workers and selects an independent native Team
+# catalog/persona when the session has explicitly enabled Team mode.
+#
+# The default Subagent surface is `subagent` + `wait_subagent` (both registered by the
+# GATE into the agent's own layer, shadowing the preset's upstream `subagent`)
+# plus the inherited `ask_user_question`.
+#
+# `restrict()` alone is NOT enough for that three-tool catalog: it only filters
+# what a scope INHERITS, so the tools other bundles register through
+# `agent.ctx.tools.register()` — the Agent Teams tools and the schedule tools in
+# a profile that composes @deepseek-ai/dsh-experimental-agent-team-profile and
+# @deepseek-ai/dsh-experimental-schedule-bundle — stay in the depth-0 agent's
+# own layer and in the model's catalog. `frugal-gate` therefore also filters the
+# final `system-prompt/assemble` tool table (the array the agent loop sends as
+# the request's tool list) and enforces the same allow list with
+# `tools.guard()`. See README §2.1.
+#
+# That filter keeps EXACTLY the allow list — the reserved `run_code` transport is
+# not an exception, because it can only appear in a scope that does not present
+# tools natively (`ptc`/`both`), which the gate reports as an unsupported
+# configuration instead of pretending to narrow it (README §2.3). And a BLANK
+# `orchestratorTools` is the only "no restriction" spelling: a non-blank list
+# that reconciles to no tool name falls back to the built-in trio and logs
+# `CONFIG-FALLBACK` (README §2.2).
+#
+# Shell rows: this bundle is authored for a profile whose `ctx.shell` is Git
+# Bash (the `dsh-gitbash-shell` bundle disables the PowerShell executor). So
+# `tool-bash` is always on and `tool-pwsh` is always off, mirroring that
+# bundle's Git Bash variants. Change both rows if you install it elsewhere.
+#
+# Everything the user is meant to change lives in the gate's Config (the GUI):
+# the orchestrator's system prompt, its tool allow list, which instruction
+# sources enter its context, and the child agents' model. The values below are
+# the defaults the GUI shows on a fresh profile. `orchestratorSystemPrompt` and
+# `diagnostics` are deliberately left out, so their schema default in `index.js`
+# is used; the `persona.prefix` block below MUST stay byte-identical to that
+# default (it is only the fallback for an agent the gate does not govern, and
+# `catalog.test.mjs` asserts the equality so a stale copy cannot ship).
+# The fixed tool-capability paragraph is NOT repeated in YAML: the gate appends
+# it to whatever prompt it installs (see `TOOL_CAPABILITY_SUFFIX` in `index.js`).
+#
+# An existing profile that already carries an explicit `frugal-gate` override
+# keeps its OWN `orchestratorTools` value (an explicit row wins over this
+# default), so an override written for the old two-tool surface must be updated
+# to name `wait_subagent` as well — otherwise the orchestrator has no way to wait
+# for the children the prompt tells it to dispatch. `catalog.test.mjs` checks the
+# active profile's patch for exactly that.
+#
+# To make new sessions start on this preset, add `selectedDefault: frugal`
+# under your profile's `agent-preset-registry` row.
+
+- insert:
+    # ── 闸门：主 agent 只做编排，子 agent 干完整活 ──────────────────────────
+    - id: frugal-gate
+      name: '@nu11dev/dsh-frugal-orchestrator'
+      config:
+        presetId: frugal
+        # The allow list the depth-0 agent ends up with: `restrict()` applies it
+        # to the inherited layers, the `system-prompt/assemble` filter applies it
+        # to the final catalog (that is what removes the agent-own Team /
+        # schedule tools), and `tools.guard()` enforces it at execution time.
+        # `wait_subagent` is registered by the gate itself, into the agent's OWN
+        # layer, so `restrict()` cannot name it (the gate drops it from the
+        # restriction and lets the catalog filter + guard enforce the full list).
+        # `read_delivered_images` is registered by the gate itself as well (the READ
+        # half of the image bridge): a Lead that could also DELIVER images could
+        # manufacture its own child's evidence, so only workers get `deliver_images`.
+        orchestratorTools: subagent, ask_user_question, wait_subagent, read_delivered_images
+        includeGlobalAgentsMd: false
+        includeProjectAgentsMd: true
+        includeSkills: false
+        includeRuntimeContext: false
+        # 子 agent 的路由默认留空 = 继承：空的 provider/model/思考级别不会写成
+        # 覆盖值，子 agent 沿用它自己的 preset / 父 agent 当前的路由。这里绝不
+        # 写作者私有的 provider 名，否则每个装这个包的人都会拿到一条不存在的路由。
+        subagentProvider: ''
+        subagentModel: ''
+        subagentReasoningEffort: ''
+        orchestratorProvider: ''
+        orchestratorModel: ''
+        orchestratorReasoningEffort: ''
+
+    - id: preset-frugal
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: frugal
+        name: 省钱编排
+        description: 主 agent 负责设计、拆分与验收；Subagent 默认 subagent / wait_subagent / ask_user_question / read_delivered_images（图片桥的只读一半，派发出去的执行者用 deliver_images 交付图片），可切原生 Agent Teams；少量执行者持续复用，限制成员/并发并校验请求预算。
+        order: 5
+        plugins:
+          # ── 主 agent 的身份：这是 `frugal-gate` 装不上自己的段落时的兜底 ────
+          # complete 段落会替换掉 identity / 工具指引 / Web GUI 等一切 section，
+          # 但不会碰 tool schema；子 agent 由 tool-subagent.persona 在自身 scope
+          # 里 shadow 掉这个段落，因此子 agent 仍然拿到完整提示词。
+          # 注意：真正喂给主 agent 的是闸门在它自己 scope 里注册的同名 section
+          # （Config.orchestratorSystemPrompt，默认值与下面这段逐字一致），所以
+          # 正常情况下改提示词去 GUI 改，不用动这里。闸门还会在这段文本后面追加
+          # 一段固定的工具能力说明（三个工具的准确 schema、续聊/等待语义）——
+          # 因为 complete 段落会被 assemble() 还原成「唯一段落」，第二段 section
+          # 会被丢掉，所以固定说明只能拼在这一段里；默认文案里不再重复它。
+          # 下面这段只在闸门没接管时兜底，所以不含固定说明。
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              complete: true
+              prefix: |-
+                你是「省钱编排」主 agent：这次任务里推理最强的一环。你负责理解用户的真实目标、收集缺失的事实、自主设计方案与取舍、拆分任务、制定验收标准，并亲自验收后向用户交付结论。子 agent 用便宜模型，只负责提供上下文和按明确要求执行；不要把最终设计、关键判断或验收结论整体外包给它们。
+
+                你没有直接读写文件、运行命令、检索资料的能力，也不要假装有：不凭猜测陈述事实，不虚构文件内容、命令输出或测试结果。需要事实时，派子 agent 去读相关原文（源码、日志、diff）或执行操作，拿到证据之后再下结论。
+
+                派发一次性任务时，prompt 要让执行者几乎不用再自己判断就能动手，按这个顺序写全：
+                1) 背景与目标：为什么做、要产出或回答什么。子 agent 看不到这段主对话，也看不到你和用户的历史消息，首派必须自带完整背景包（短而全，不要指望它去猜）。
+                2) 精确输入：工作区/仓库的绝对路径，要读的文件与行号区间，日志、数据、复现脚本的路径，可以用的命令。路径或事实不确定，就先派一次只读取证，不要让它自己满仓找。
+                3) 操作序列：按顺序列出要做的事；独立任务在同一条回复里并行派发，有依赖的按顺序派发，并明确各自负责的文件或区域，避免多个 child 同时修改同一个文件。
+                4) 范围与禁区：允许改的文件/目录，明确不许碰的文件和不许做的事（提交、重启服务、改配置、删数据、扩大范围）。执行者不得自行扩大范围；在范围外发现的问题只报告，不顺手改。
+                5) 验收与验证：给出可运行的验证命令或判据（测试、构建、检查），以及失败时怎么取证；说清「怎样算完成」。
+                6) 交付格式：结论 + 可复核证据（文件路径、关键行号、命令原文、关键输出片段）+ 未完成项与风险，不要只回「已完成」。
+                7) 阻塞策略：确实缺关键信息且无法自行查证才问（一次问清、给出选项）；其余情况做合理假设继续，并在交付里显式标注「假设」。不要为等待结果另建观察者。
+                分工固定：设计、取舍、验收标准与最终判断由你（Lead）负责，执行者只按上面的指令取证和操作。一句话就能说清的小任务不必套满模板，但范围、验收判据和交付格式仍要写。
+
+                派发后保留工具返回的 agent_id。续聊会保留 child 自己已经积累的上下文（包括它读过的代码和得到的结论），所以后续指令只写新增要求，不必重复背景；但用户新给的信息、新的范围与禁区、变更后的验收判据和交付格式必须转发过去，不要指望它自己知道。证据不足或结论有误时，优先用同一个 agent_id 续聊补充证据或修正；不要把重派当成续聊，重派会让它丢掉已经积累的上下文。
+
+                等待 child 期间你可以继续自己推理、设计方案、准备验收；必须等证据才能决策时用 wait_subagent 明确等待，不要靠反复查状态或猜测进度。
+
+                验收是你的责任：拿到 child 的结果后，亲自对照用户目标检查关键源码、真实差异和测试证据，必要时再派定向检查补证。child 说通过不等于完成，最终是否达标由你判断。向用户报告已核实的事实、结论，以及还没解决的限制。
+
+                只有必须由用户本人决定的问题才用 ask_user_question；其余情况自主推进，不要频繁找用户确认。
+
+                （身份提示词、工具清单、上下文注入、子 agent 模型都在侧栏「插件」面板 → 组合包 @nu11dev/dsh-frugal-orchestrator → 行 frugal-gate → 配置里改，改完立即生效；末尾那段固定的工具能力说明由插件追加，不受这段提示词影响。）
+          # ── 上下文注入：全局/项目级 AGENTS.md 都先按常规加载 ────────────────
+          # dshHome 必须是真实的 $DSH_HOME，否则用户全局 $DSH_HOME/AGENTS.md
+          # 探测为 absent，开关就没有关的对象。真正的取舍由 `frugal-gate` 在
+          # 运行时按 includeGlobalAgentsMd / includeProjectAgentsMd 逐块剥离，
+          # 只有主 agent 受影响，子 agent 拿到的是完整基线。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              dshHome: !!js dshHomePath('')
+              maxBytes: 65536
+          # ── 工作工具：主 agent 看不到，子 agent 全都有 ────────────────────
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: true
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          # skill 目录与 skill 工具：闸门把 `skill` 从 allow 列表拿掉后，
+          # dsh-tool-skill 连「可用 skills 目录」这段一起不再发给主 agent。
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-goal
+            name: '@deepseek-ai/dsh-command-goal'
+          - id: tool-goal
+            name: '@deepseek-ai/dsh-tool-goal'
+          - id: planning
+            name: cordis:group
+            group: true
+            isolate:
+              planMode: true
+            config:
+              - id: plan-mode
+                name: '@deepseek-ai/dsh-plan-mode'
+                config:
+                  section: |
+                    You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+                    Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+                    The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+                    Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+                    Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+                    When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+          # ── 压缩：政策由 @nu11dev/dsh-compaction-policy 决定，引擎仍在 preset 内 ──────
+          # 这一组的 isolate 把 compaction / toolResultPruner 变成 ENTRY-LOCAL
+          # symbol（compaction#<entry id>），只有组内行读得到 ctx.compaction；
+          # profile 顶层行与 agent.ctx 都读不到（v0.3 的盲区）。所以策略行不能直接
+          # 拿引擎——必须靠下面这条 bridge 行，在组内把引擎按 mount 重新发布：
+          #   - compaction-policy 顶层行 -> agentPresets.serviceFor(agent, 'frugalCompaction')
+          #   - bridge 行 -> ctx.isolate('frugalCompaction').provide(...)
+          # 一条 bridge 行 = 一个 preset 的接管开关；没装的 preset 完全不受影响。
+          # 因此本 preset 强依赖 @nu11dev/dsh-compaction-policy；不装它就把这一行删掉，
+          # preset 会退回宿主内置压缩（内置阈值由模型条目的 maxTokens 决定）。
+          # auto: false 必须保留：真正的压缩时机由 policy 行在 agent/pre-step 里
+          # 触发（请求构建之前），引擎自带比例若还活着会抢跑并且用错预算。
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+                config:
+                  auto: false
+              - id: compaction-policy-bridge
+                name: '@nu11dev/dsh-compaction-policy/bridge'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          # ── 委派：子 agent 从这里拿 subagent；主 agent 拿到的是闸门的同名工具 ──
+          # 这一行的 `subagent` 是继承层里的版本（自带 UI 标签、无等待接口）。
+          # `frugal-gate` 会在主 agent 自己那一层再注册一个同名 `subagent`（带
+          # agent_id 续聊）与 `wait_subagent`，就近 shadow 掉这一行；允许列表里的
+          # `subagent` 因此指的是闸门那个。v0.3 执行者禁止嵌套派发；Team 通信使用原生工具。
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+              - id: tool-subagent-list-agents
+                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  # continuable：派发默认进后台，子 agent 结束时把结果作为一条
+                  # 消息送回主 agent，所以主 agent 不需要任何「取结果」工具。
+                  backgroundMode: continuable
+                  # 只允许 1 层委派：子 agent 不能再往下派。
+                  maxDepth: 1
+                  # ── 子 agent 的模型与思考级别 ─────────────────────────────
+                  # 这里刻意不写 agentOptions：写死 provider/model 会把作者私有的
+                  # 路由兜底给每个用户。要改子 agent 的模型，用 frugal-gate 的
+                  # subagentProvider / subagentModel / subagentReasoningEffort
+                  # （GUI 里改，立即生效，不用重启）；不填就继承父 agent 的路由。
+                  # 子 agent 自己的身份；它会 shadow 掉上面那段 orchestration 提示词，
+                  # 于是子 agent 拿到的是完整系统提示词 + 这段身份。
+                  # 必须与 lib/delegation.js 的 CHILD_PERSONA 逐字一致（闸门创建
+                  # child 时用同一段文本），catalog.test.mjs 会断言这一点。
+                  persona: |-
+                    你是被派来干活的子 agent，负责按明确要求执行一个具体子任务并汇报。
+                    - 直接用工具在真实工作区里动手：读/改文件、跑命令、检索资料、按需加载 skill；不要只给建议或方案。
+                    - 汇报必须带原文证据：文件路径、命令、关键行号或输出片段，引用要能复核。
+                    - 不擅自越范围：只做被明确要求的事；不顺手重构、不扩大改动面、不替 parent 拍板关键设计。
+                    - 关键设计或取舍一旦模糊，先返回事实与可选项（各自的代价），让 parent 决定，不要自行决定后继续。
+                    - 不要反问「是否继续」；信息不够就先自己查清楚，确实需要人来决定时，在结论里写清楚需要什么。
+                    - 汇报结构：做了什么 / 证据 / 结论 / 遗留风险或未完成的部分。
+              # fork 子 agent 继承父 agent 的模型（这里是子 agent 自己的便宜模型），
+              # 只有子 agent 用得到；主 agent 看不到它。
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+                  backgroundMode: continuable
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'

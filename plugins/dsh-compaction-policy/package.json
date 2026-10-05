@@ -1,0 +1,81 @@
+{
+  "name": "@nu11dev/dsh-compaction-policy",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "上下文预算与压缩策略：输出 cap 按剩余空间收窄（fit）、压缩阈值与输出预留解耦（reserve）、经 bridge 行接管 preset 内的 compaction 引擎。",
+  "license": "MIT",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./bridge": "./bridge.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "bridge.js",
+    "client.js",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Star-233/dsh-plugins.git",
+    "directory": "plugins/dsh-compaction-policy"
+  },
+  "homepage": "https://github.com/Star-233/dsh-plugins/tree/main/plugins/dsh-compaction-policy#readme",
+  "bugs": {
+    "url": "https://github.com/Star-233/dsh-plugins/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "cordis-plugin",
+    "context-compaction",
+    "context-window",
+    "compaction",
+    "context-budget",
+    "llm"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-primitives": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node policy.test.mjs && node composition.test.mjs && node compaction.test.mjs && node fit.test.mjs && node overflow.test.mjs && node client.test.mjs",
+    "verify:profile": "node verify-profile.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  }
+}

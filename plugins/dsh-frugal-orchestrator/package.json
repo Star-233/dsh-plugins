@@ -1,0 +1,83 @@
+{
+  "name": "@nu11dev/dsh-frugal-orchestrator",
+  "version": "0.4.0",
+  "type": "module",
+  "description": "省钱编排：Subagent/原生 Agent Teams 会话模式、成员复用与并发限制、GUI 状态诊断；上下文预算与压缩策略由 @nu11dev/dsh-compaction-policy 提供。",
+  "license": "MIT",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Star-233/dsh-plugins.git",
+    "directory": "plugins/dsh-frugal-orchestrator"
+  },
+  "homepage": "https://github.com/Star-233/dsh-plugins/tree/main/plugins/dsh-frugal-orchestrator#readme",
+  "bugs": {
+    "url": "https://github.com/Star-233/dsh-plugins/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "cordis-plugin",
+    "agent-orchestration",
+    "subagent",
+    "agent-teams",
+    "cost-control",
+    "llm"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "@nu11dev/dsh-compaction-policy": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-primitives": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "@nu11dev/dsh-compaction-policy": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node gate.test.mjs && node catalog.test.mjs && node client.test.mjs && node delegation.test.mjs && node images.test.mjs && node images-local.test.mjs && node baseline.test.mjs && node budgets.test.mjs && node recovery.test.mjs && node team.test.mjs",
+    "verify:profile": "node verify-profile.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  }
+}

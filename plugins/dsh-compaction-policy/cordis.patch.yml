@@ -1,0 +1,110 @@
+# @nu11dev/dsh-compaction-policy bundle patch.
+#
+# Inserts ONE thing: `compaction-policy` — a TOP-LEVEL row (the host half of
+# this package, `index.js`). It is top-level on purpose: the Web settings
+# document is built from `configEditor.entries()`, which keeps only direct
+# children of an `include` entry, so a row nested inside a preset tree is never
+# addressable and can never grow a configure page. A top-level row whose Config
+# declares `.volatile()` fields does — with the namespace equal to the row id
+# (`compaction-policy`), which is where the sidebar's 「插件」 panel
+# (组合包 @nu11dev/dsh-compaction-policy → 行 compaction-policy → 「配置」) reads and
+# writes. It is NOT under 「设置」: 设置 → 内置插件 is a read-only inventory.
+#
+# ───────────────────────────────────────────────────────────────────────────
+# SECOND HALF — you must ALSO edit the preset you want governed (NOT here).
+# ───────────────────────────────────────────────────────────────────────────
+# This row cannot reach a preset's compaction engine on its own. A preset mounts
+# its engine in a `cordis:group` with
+#   isolate: { compaction: true, toolResultPruner: true }
+# which interns each service name as an ENTRY-LOCAL symbol
+# (`compaction#<entry id>`). Cordis resolves a service through the CALLER's
+# isolate table, so only rows INSIDE that group can read `ctx.compaction`; a
+# top-level row — and `agent.ctx`, which is the mount's sibling, not its
+# descendant — reads `undefined` forever. That was the v0.3 blind spot: the row
+# threw COMPACTION-UNAVAILABLE on every threshold crossing and its tool-result
+# pruning silently did nothing.
+#
+# The fix is `@nu11dev/dsh-compaction-policy/bridge`: a row that sits INSIDE the group,
+# republishes the engine under a FRESH per-mount isolate label
+# (`ctx.isolate('frugalCompaction')`), and is then addressable per agent through
+# the host's own `agentPresets.serviceFor(agent, name)`. The bridge row IS the
+# takeover switch: a preset that does not carry it is left completely untouched
+# (logged once as `ungoverned … reason=no-bridge`).
+#
+# So, for every preset that should be governed, restate the whole preset in your
+# profile's `cordis.patch.yml` (a preset's child rows are never addressable
+# from an outer layer, and a patch replaces the targeted row's WHOLE config), and
+# change its compaction group exactly like this:
+#
+#   - id: compaction
+#     name: cordis:group
+#     group: true
+#     isolate:
+#       compaction: true
+#       toolResultPruner: true
+#     config:
+#       - id: compaction-basic
+#         name: '@deepseek-ai/dsh-compaction-basic'
+#         config:
+#           # The policy row now decides WHEN to compact; leaving the engine's own
+#           # ratio live would let it fire first, at the wrong budget.
+#           auto: false
+#       - id: compaction-policy-bridge          # <-- ADD THIS ROW
+#         name: '@nu11dev/dsh-compaction-policy/bridge'
+#       - id: command-compact
+#         name: '@deepseek-ai/dsh-command-compact'
+#       - id: tool-result-pruner
+#         name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+#         config:
+#           thresholdChars: 8192
+#           headChars: 4096
+#           tailChars: 1024
+#
+# `auto: false` is required: this package drives `compaction.compactRegion()`
+# itself (from `agent/pre-step`, BEFORE the request is built), and the engine's
+# built-in ratio would otherwise compact earlier and at a different budget.
+# `command-compact` and the pruner stay as they are — the bridge republishes the
+# pruner too, and the policy row narrows its thresholds the same way.
+#
+# Removing the bridge row from a preset (or not adding it) is the supported way
+# to opt that preset out; nothing else here changes behaviour for it.
+#
+# ───────────────────────────────────────────────────────────────────────────
+# WHAT THE CONFIG MEANS (all fields are live-editable in the GUI)
+# ───────────────────────────────────────────────────────────────────────────
+# Reserve (B): the compaction threshold is `window − max(reserveRatio × window,
+# reserveFloorTokens) − fitHeadroomTokens`, clamped to `[1, window − 1]`. On a
+# 256k window with the defaults (ratio 0.15, floor 16384) the reserve is 38400,
+# so the threshold lands at 217600 — decoupled from any request output cap.
+# `thresholdPercent` / `thresholdTokens` override that computed value; a bare
+# number in `thresholdPercent` is read as a percentage (80 -> 0.8), while
+# `thresholdTokens` is an absolute count. `agentThresholdOverrides` takes
+# `<agentId>=<value>` lines (percentage or absolute) for per-agent budgets.
+#
+# Fit (C): every request's output cap is narrowed to the room left after the
+# prompt, i.e. `min(desiredCap, window − prompt − fitHeadroomTokens)`, floored at
+# `minFittedOutputTokens`. The prompt is measured by `tokenMeter` and padded by
+# `estimateMarginDivisor` (1/10 by default). `desiredOutputCap: 0` means 「use the
+# model's declared `maxTokens`」 (决策 A: all agents follow the model entry, no
+# artificial Lead/worker split). `workerOutputCap` is an OPT-IN ceiling for
+# delegated workers and defaults to 0 = off. `skipFitTargets` lists
+# `provider/model` entries whose requests must not be narrowed.
+#
+# Keep-recent (retention): `keepRecentTokens` is the tail the compactor refuses
+# to cut; the system prompt is never cut and tool pairs are kept balanced.
+#
+# Recovery: a provider `CONTEXT_WINDOW_EXCEEDED` triggers one forced compaction
+# and a retry, up to `maxOverflowRetries` times per agent. Budget and compaction
+# failures NEVER terminate a turn — they are recorded and degraded (same
+# semantics as pi / oh-my-oh-pi).
+#
+# `diagnostics: true` appends a line per decision to
+# `$DSH_HOME/compaction-policy.log` (512 KiB cap). Turn it on first when
+# something looks wrong.
+#
+# To make new sessions start on a governed preset, add `selectedDefault: <id>`
+# under your profile's `agent-preset-registry` row.
+
+- insert:
+    - id: compaction-policy
+      name: '@nu11dev/dsh-compaction-policy'

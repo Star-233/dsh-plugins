@@ -1,0 +1,158 @@
+# Tag-triggered npm releases over OIDC trusted publishing (no stored token).
+#
+# Tag scheme: <package>-v<version>, e.g.
+#   dsh-compaction-policy-v0.1.0
+#   dsh-frugal-orchestrator-v0.4.0
+# The prefix picks the package; a tag that does not name the version in that
+# package's package.json fails the job before anything is published.
+#
+# The two jobs below are deliberately separate, and their STEP LISTS are
+# intentionally identical — only the job id/name and the two `env` values differ.
+# Reason: `jobs.<job_id>.if` is evaluated BEFORE the matrix is expanded, and the
+# `matrix` context is not available there (GitHub allows only `github`, `needs`,
+# `vars` and `inputs` in a job-level `if`). A `matrix.*` reference therefore
+# resolves to null, `startsWith(github.ref_name, null)` matches EVERY tag, both
+# matrix branches run, and the branch whose prefix does not match dies in the
+# version-guard step below. Keep the two step lists in sync when editing either.
+#
+# Required one-time setup on npmjs.com (per package, Settings -> Trusted
+# publishing): organization/user `Star-233`, repository `dsh-plugins`, workflow
+# filename `publish.yml`, and — for entries created after 2026-09-03 — `npm
+# publish` enabled explicitly (a new entry allows staged publishing only). If a
+# GitHub environment is ever attached to a job, that environment name must be
+# recorded in the same npm configuration. Do NOT move these steps into a
+# reusable (`workflow_call`) workflow: npm matches the configured filename
+# against the workflow that actually runs `npm publish`.
+#
+# `id-token: write` is what lets the runner mint the OIDC token; provenance is
+# generated automatically for a public package from a public repository, and
+# --provenance is passed explicitly so the same command also works unchanged if
+# a maintainer ever falls back to an NPM_TOKEN secret.
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'dsh-compaction-policy-v*'
+      - 'dsh-frugal-orchestrator-v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish-compaction-policy:
+    name: publish plugins/dsh-compaction-policy
+    if: startsWith(github.ref_name, 'dsh-compaction-policy-v')
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE: plugins/dsh-compaction-policy
+      PREFIX: dsh-compaction-policy-v
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Trusted publishing needs npm >= 11.5.1
+        run: |
+          set -euo pipefail
+          npm install -g 'npm@^11.5.1'
+          npm --version
+
+      - name: Fail unless this tag names this package's version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            "$PREFIX"*) version="${TAG#"$PREFIX"}" ;;
+            *) echo "tag $TAG is not a $PREFIX release"; exit 1 ;;
+          esac
+          declared="$(node -p "require('./$PACKAGE/package.json').version")"
+          if [ "$version" != "$declared" ]; then
+            echo "tag names $version but $PACKAGE/package.json declares $declared"
+            exit 1
+          fi
+          echo "publishing $PACKAGE@$declared"
+
+      - name: Install the DSH runtime the suites resolve against
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/.ci-runtime"
+          mkdir -p "$runtime"
+          cd "$runtime"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
+          {
+            echo "DSH_TOOLS_DIR=$runtime/node_modules/@deepseek-ai"
+            echo "DSH_PROFILE_DIR=$runtime"
+          } >> "$GITHUB_ENV"
+
+      - name: Test before publishing
+        working-directory: ${{ env.PACKAGE }}
+        run: npm test
+
+      - name: Publish
+        working-directory: ${{ env.PACKAGE }}
+        run: npm publish --access public --provenance
+
+  publish-frugal-orchestrator:
+    name: publish plugins/dsh-frugal-orchestrator
+    if: startsWith(github.ref_name, 'dsh-frugal-orchestrator-v')
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE: plugins/dsh-frugal-orchestrator
+      PREFIX: dsh-frugal-orchestrator-v
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Trusted publishing needs npm >= 11.5.1
+        run: |
+          set -euo pipefail
+          npm install -g 'npm@^11.5.1'
+          npm --version
+
+      - name: Fail unless this tag names this package's version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            "$PREFIX"*) version="${TAG#"$PREFIX"}" ;;
+            *) echo "tag $TAG is not a $PREFIX release"; exit 1 ;;
+          esac
+          declared="$(node -p "require('./$PACKAGE/package.json').version")"
+          if [ "$version" != "$declared" ]; then
+            echo "tag names $version but $PACKAGE/package.json declares $declared"
+            exit 1
+          fi
+          echo "publishing $PACKAGE@$declared"
+
+      - name: Install the DSH runtime the suites resolve against
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/.ci-runtime"
+          mkdir -p "$runtime"
+          cd "$runtime"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
+          {
+            echo "DSH_TOOLS_DIR=$runtime/node_modules/@deepseek-ai"
+            echo "DSH_PROFILE_DIR=$runtime"
+          } >> "$GITHUB_ENV"
+
+      - name: Test before publishing
+        working-directory: ${{ env.PACKAGE }}
+        run: npm test
+
+      - name: Publish
+        working-directory: ${{ env.PACKAGE }}
+        run: npm publish --access public --provenance

@@ -1,0 +1,55 @@
+# Tests for both bundles against a pinned DSH runtime.
+#
+# The suites resolve the real host packages instead of stubbing them, so the two
+# environment variables below are the whole trick:
+#   DSH_TOOLS_DIR   the @deepseek-ai directory holding the runtime packages
+#   DSH_PROFILE_DIR a directory whose node_modules can resolve @deepseek-ai/schemastery
+# A plain `npm install` of the dsh CLI hoists the runtime into the installing
+# project's node_modules, so both point at the scratch runtime created here.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - plugins/dsh-compaction-policy
+          - plugins/dsh-frugal-orchestrator
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install the DSH runtime the suites resolve against
+        run: |
+          set -euo pipefail
+          runtime="$GITHUB_WORKSPACE/.ci-runtime"
+          mkdir -p "$runtime"
+          cd "$runtime"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
+          {
+            echo "DSH_TOOLS_DIR=$runtime/node_modules/@deepseek-ai"
+            echo "DSH_PROFILE_DIR=$runtime"
+          } >> "$GITHUB_ENV"
+
+      - name: Test
+        working-directory: ${{ matrix.package }}
+        run: npm test
+
+      - name: Show the publishable file list
+        working-directory: ${{ matrix.package }}
+        run: npm pack --dry-run

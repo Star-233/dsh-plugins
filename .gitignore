@@ -1,0 +1,19 @@
+# Local session and work material — never published.
+analysis/
+plans/
+.agents/
+AGENTS.md
+
+# Scratch runtime the workflows build for the test suites.
+.ci-runtime/
+
+# Package manager output.
+node_modules/
+
+# Publish artifacts and logs.
+*.tgz
+*.log
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db
