@@ -84,7 +84,9 @@ jobs:
           runtime="$GITHUB_WORKSPACE/.ci-runtime"
           mkdir -p "$runtime"
           cd "$runtime"
-          npm init -y >/dev/null
+          # `npm init -y` rejects a leading-dot directory name (".ci-runtime"),
+          # so the scratch manifest is written directly.
+          printf '{"name":"dsh-ci-runtime","private":true}\n' > package.json
           npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
           {
             echo "DSH_TOOLS_DIR=$runtime/node_modules/@deepseek-ai"
@@ -142,7 +144,9 @@ jobs:
           runtime="$GITHUB_WORKSPACE/.ci-runtime"
           mkdir -p "$runtime"
           cd "$runtime"
-          npm init -y >/dev/null
+          # `npm init -y` rejects a leading-dot directory name (".ci-runtime"),
+          # so the scratch manifest is written directly.
+          printf '{"name":"dsh-ci-runtime","private":true}\n' > package.json
           npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
           {
             echo "DSH_TOOLS_DIR=$runtime/node_modules/@deepseek-ai"

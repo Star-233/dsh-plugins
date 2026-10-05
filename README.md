@@ -95,7 +95,10 @@ The reproducible CI recipe, which is exactly what `.github/workflows/ci.yml` run
 
 ```bash
 mkdir -p .ci-runtime && cd .ci-runtime
-npm init -y && npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
+# npm derives a package name from the directory, and rejects the leading dot,
+# so write the scratch manifest instead of `npm init -y`.
+printf '{"name":"dsh-ci-runtime","private":true}\n' > package.json
+npm install --no-audit --no-fund @deepseek-ai/dsh@0.2.0-rc.2
 export DSH_TOOLS_DIR="$PWD/node_modules/@deepseek-ai"   # npm hoists the runtime here
 export DSH_PROFILE_DIR="$PWD"
 cd ../plugins/dsh-compaction-policy && npm test
