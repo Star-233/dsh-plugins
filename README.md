@@ -113,24 +113,61 @@ asserts that the profile links this checkout, so it only means something on a ma
 
 ## Releasing
 
-Releases are tag-driven and credential-free in CI:
+**The first release cannot use OIDC.** A trusted publisher is configured on the *package's* settings page
+on npmjs.com, and that page only exists once the package does — so a brand-new package must be published
+once with a normal login, and only then can the tag workflow take over. Neither package exists on npm
+yet, so the bootstrap below is still outstanding.
+
+### One-time bootstrap (per package)
+
+```bash
+# 1. Log in with the npm account that owns the scope (here: @nu11dev)
+npm login
+npm whoami                      # must print the account that owns @nu11dev
+
+# 2. Publish the first version from the package directory
+cd plugins/dsh-compaction-policy && npm publish --access public
+cd ../dsh-frugal-orchestrator    && npm publish --access public
+
+# 3. Now the package exists: npmjs.com -> Packages -> <package> -> Settings ->
+#    Trusted publishing -> GitHub Actions, and fill in exactly:
+#      Organization or user: Star-233
+#      Repository:           dsh-plugins
+#      Workflow filename:    publish.yml      (filename only, with .yml)
+#    Then tick the direct-publish permission: entries created after 2026-09-03
+#    default to `npm stage publish` only, and this workflow runs `npm publish`.
+#    The package.json `repository.url` must match the GitHub repo exactly.
+
+# 4. Afterwards tighten the account: Settings -> Publishing access ->
+#    "Require 2FA and disallow tokens" (and delete any temporary token used above).
+```
+
+If a first release ever has to come from CI instead, publish once with a granular write token
+(`NODE_AUTH_TOKEN`) and then delete it — the tag workflow itself never needs a stored token.
+
+The bootstrap already consumed the version it published, so the first *tag-driven* release is the **next**
+version (bump `package.json`, then tag).
+
+### Every later release
 
 1. Bump `version` in the package's `package.json` and commit it.
 2. Push a tag named `<package>-v<version>` — `dsh-compaction-policy-v0.1.0` or
    `dsh-frugal-orchestrator-v0.4.0`. The tag prefix selects the package; the workflow refuses to
    publish when the tag does not name the version in `package.json`.
 3. The workflow re-runs the tests, then publishes with provenance over **npm trusted publishing**
-   (OIDC), so no long-lived npm token is stored in the repository.
+   (OIDC), so no long-lived npm token is stored in the repository. The publish step clears the
+   `NODE_AUTH_TOKEN` placeholder that `actions/setup-node` writes into `.npmrc` — a configured token
+   would otherwise win over the OIDC exchange and fail with 401/404.
 
-Publishing needs one-time setup on npmjs.com that no workflow can do for itself (see
-`.github/workflows/publish.yml` for the exact contract):
+The rest of the npm-side setup is in `.github/workflows/publish.yml`:
 
 - one **trusted publisher** per package: organization/user `Star-233`, repository `dsh-plugins`,
   workflow filename `publish.yml`;
 - after the 2026-09-03 npm change, a new trusted-publisher entry allows staged publishing only, so
   **enable `npm publish` explicitly** on it;
 - if you later attach a GitHub *environment* to the publish job, that environment must be recorded in
-  the same npm configuration.
+  the same npm configuration;
+- operator prerequisites (bootstrap only): npm CLI ≥ 11.5.1, Node ≥ 22.14, a GitHub-hosted runner.
 
 ## License
 

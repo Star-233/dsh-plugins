@@ -8,12 +8,14 @@
 #
 # The two jobs below are deliberately separate, and their STEP LISTS are
 # intentionally identical — only the job id/name and the two `env` values differ.
-# Reason: `jobs.<job_id>.if` is evaluated BEFORE the matrix is expanded, and the
-# `matrix` context is not available there (GitHub allows only `github`, `needs`,
-# `vars` and `inputs` in a job-level `if`). A `matrix.*` reference therefore
-# resolves to null, `startsWith(github.ref_name, null)` matches EVERY tag, both
-# matrix branches run, and the branch whose prefix does not match dies in the
-# version-guard step below. Keep the two step lists in sync when editing either.
+# Reason: `jobs.<job_id>.if` is evaluated BEFORE the matrix exists, and it may use
+# only the `github`, `needs`, `vars` and `inputs` contexts. Referencing `matrix.*`
+# there is not "empty at runtime": it is an ILLEGAL context, and GitHub rejects the
+# whole workflow when it loads it —
+#   Invalid workflow file: ... Unrecognized named-value: 'matrix'
+# (see https://github.com/orgs/community/discussions/37883). Hence one static job
+# per package, each filtering on its own tag prefix through `github.ref_name`.
+# Keep the two step lists in sync when editing either one.
 #
 # Required one-time setup on npmjs.com (per package, Settings -> Trusted
 # publishing): organization/user `Star-233`, repository `dsh-plugins`, workflow
@@ -99,6 +101,15 @@ jobs:
 
       - name: Publish
         working-directory: ${{ env.PACKAGE }}
+        env:
+          # `actions/setup-node` with `registry-url` writes
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc and
+          # exports a placeholder token. The npm CLI prefers a configured token
+          # over the OIDC exchange, so the placeholder must be cleared here or the
+          # publish fails with 401/404 instead of using the trusted publisher
+          # (see https://github.com/actions/setup-node/issues/1440). An explicit
+          # empty value overrides the job-level variable for this step only.
+          NODE_AUTH_TOKEN: ''
         run: npm publish --access public --provenance
 
   publish-frugal-orchestrator:
@@ -159,4 +170,13 @@ jobs:
 
       - name: Publish
         working-directory: ${{ env.PACKAGE }}
+        env:
+          # `actions/setup-node` with `registry-url` writes
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc and
+          # exports a placeholder token. The npm CLI prefers a configured token
+          # over the OIDC exchange, so the placeholder must be cleared here or the
+          # publish fails with 401/404 instead of using the trusted publisher
+          # (see https://github.com/actions/setup-node/issues/1440). An explicit
+          # empty value overrides the job-level variable for this step only.
+          NODE_AUTH_TOKEN: ''
         run: npm publish --access public --provenance
