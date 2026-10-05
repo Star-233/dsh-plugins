@@ -46,7 +46,8 @@ ctx.logger.level = 0;
 await ctx.plugin(SessionStore);
 await ctx.plugin(SessionQueryEngine);
 ctx.on('session/flush', () => {}); // deterministic in-memory durability sink
-ctx.reflect.provide('subagents', { listChildren: async () => [] });
+let catalogChildren = [];
+ctx.reflect.provide('subagents', { listChildren: async () => catalogChildren });
 const settings = { defaultCoordinationMode: 'subagent', maxMembers: 3, maxConcurrent: 2 };
 const controller = new Coordination({ ctx, settings: () => settings, governs: () => true, reconcile: () => {} });
 function actor(id) {
@@ -107,5 +108,39 @@ const disposeFailure = ctx.on('session/flush', () => { throw new Error('mode flu
 await assert.rejects(controller.switchMode(c, 'team'), /mode flush failed/);
 assert.equal(controller.mode(c), 'subagent');
 disposeFailure();
+// --- receipts and slot release on a failed dispatch -------------------------------
+// Two tools answer to `subagent`: this bundle reports `agent_id`, the host's
+// @deepseek-ai/dsh-tool-subagent reports `subagentId`. Reading only one of them
+// made every dispatch look receipt-less AFTER its child was already created.
+const { dispatchMemberId, releaseFailedDispatch } = await import('./lib/team.js');
+assert.equal(dispatchMemberId({ kind: 'continuable', agent_id: 'own-child' }), 'own-child');
+assert.equal(dispatchMemberId({ kind: 'continuable', subagentId: 'host-child' }), 'host-child', "the host's continuable value names the child `subagentId`");
+assert.equal(dispatchMemberId({ kind: 'background', jobId: 'job-1' }), undefined, 'a background job names no resumable member');
+assert.equal(dispatchMemberId({ kind: 'foreground', runId: 'run-1', output: [] }), undefined, 'a foreground run names no resumable member');
+assert.equal(dispatchMemberId({ kind: 'continuable', agent_id: '', subagentId: '' }), undefined, 'an empty id is not a member');
+assert.equal(dispatchMemberId(undefined), undefined);
+
+const dispatch = actor('dispatch');
+await controller.run(dispatch, async () => {});
+await controller.run(dispatch, async (entry) => {
+  const nothingCreated = await entry.budget.reserve('subagent', null, 'worker');
+  await releaseFailedDispatch(controller, entry, nothingCreated, 'subagent');
+  assert.deepEqual(entry.budget.counts('subagent'), { members: 0, active: 0 }, 'a failed dispatch that created nothing returns its slot');
+  assert.deepEqual(entry.budget.state.reservations, [], 'and leaves no reservation behind');
+
+  catalogChildren = [{ id: 'child-1', mode: 'continuable', label: 'worker' }];
+  const childCreated = await entry.budget.reserve('subagent', null, 'worker');
+  await releaseFailedDispatch(controller, entry, childCreated, 'subagent');
+  const counts = entry.budget.counts('subagent');
+  assert.equal(counts.active, 1, 'the child the failed call really did create still holds exactly one slot');
+  assert.equal(counts.members, 1, 'and is recovered as a reusable member rather than lost');
+  assert.deepEqual(entry.budget.state.reservations, [], 'a reconciled failure keeps no reservation');
+
+  const third = await entry.budget.reserve('subagent', null, 'worker');
+  await releaseFailedDispatch(controller, entry, third, 'subagent');
+  assert.deepEqual(entry.budget.state.reservations, [], 'reconciling twice in a row stays clean');
+});
+
 console.log('admission: total/concurrency/reuse, durable-before-dispatch, proven rollback and unknown receipts passed');
 console.log('coordination: persistent per-session modes, legacy/fork isolation and busy switch refusal passed');
+console.log('dispatch failure: both receipt shapes resolve, and a failed dispatch returns its slot');

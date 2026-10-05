@@ -132,6 +132,7 @@ import { Coordination } from './lib/coordination.js';
 import { installHostUi } from './lib/host-ui.js';
 import { DELIVER_TOOL_NAME, READ_TOOL_NAME, createFileStore, installImageBridge } from './lib/images.js';
 import { TEAM_TOOLS, TEAM_PROMPT, TEAM_CONTRACT, DELEGATION_DENY, workerPersona, teamMembership, installAdmission, teamWaitContract, waitAgentGuardReason } from './lib/team.js';
+import { declareEventVocabulary } from './lib/vocabulary.js';
 
 /** Cordis plugin name. */
 export const name = 'frugal-gate';
@@ -704,6 +705,11 @@ function dropSections(text, drop) {
  * @param config - the row's resolved config (see {@link Config}).
  */
 export function apply(ctx, config) {
+  // Declared before anything can append `frugal/state`: an undeclared type makes
+  // every cold read of that session — including /api/session.export — refuse the
+  // whole log. See ./lib/vocabulary.js for why registration, not `ignorable`.
+  const vocabulary = declareEventVocabulary();
+  if (!vocabulary.ok) ctx.logger?.warn?.(`frugal-gate: frugal/state could not be declared on the session vocabulary — ${vocabulary.message}`);
   /** Depth-0 agents of this preset: agent -> disposer releasing this gate's effects on it. */
   const owned = new Map();
   /** Depth-0 agents of this preset: the orchestrators the tool/context switches own. */

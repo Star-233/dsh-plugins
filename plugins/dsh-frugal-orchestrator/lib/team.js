@@ -90,6 +90,68 @@ const PRE_ADMISSION_CODES = new Set([
   'TEAM_SELF_MESSAGE', 'TEAM_MESSAGE_TOO_LARGE', 'TEAM_MAILBOX_FULL', 'TOOL_ABORTED_BEFORE_DISPATCH',
 ]);
 
+/**
+ * The durable member id one dispatched tool value proves.
+ *
+ * Two different tools answer to the name `subagent` in this deployment: this
+ * bundle's own `subagent` (`lib/delegation.js`) reports `agent_id`, while the
+ * host's `@deepseek-ai/dsh-tool-subagent` reports `subagentId` for the
+ * continuable child it starts. Both name the SAME child session, so either key
+ * identifies the member. Reading only `agent_id` made every dispatch look
+ * receipt-less even though its child had already been created, which threw
+ * ADMISSION-RECEIPT and stranded the reservation.
+ *
+ * A `background` job id and a `foreground` run id are deliberately NOT member
+ * identities: they name no resumable conversation, so they can be neither
+ * continued nor waited on, and the ledger must not pretend otherwise.
+ *
+ * @param value - the dispatched tool's structured value.
+ * @returns the member id, or undefined when the value proves no member.
+ */
+export function dispatchMemberId(value) {
+  if (value === null || typeof value !== 'object') return undefined;
+  for (const key of ['agent_id', 'subagentId']) {
+    const id = value[key];
+    if (typeof id === 'string' && id.length > 0) return id;
+  }
+  return undefined;
+}
+
+/**
+ * Give back the concurrency slot a failed dispatch reserved.
+ *
+ * `MemberBudgets.rejected(token, false)` deliberately KEEPS a reservation whose
+ * receipt was never observed ("possibly accepted work"), which is right while
+ * the outcome is still unknown. A dispatch that has already failed is not
+ * unknown, and keeping its slot there made `maxConcurrent` unrecoverable: the
+ * first two failed calls consumed both slots for the rest of the session, and
+ * every later call was refused with CONCURRENCY-LIMIT against an empty
+ * `reusable` list.
+ *
+ * So the failed dispatch is reconciled before its slot is handed back:
+ * `syncMembers` re-reads the durable child catalog and promotes any child the
+ * failed call really did create into a member. That child then holds its own
+ * slot — correctly — and becomes reusable, so nothing is oversold and nothing
+ * is lost. Only when the catalog cannot be read at all is the reservation kept,
+ * because then no evidence says the child does not exist.
+ *
+ * @param controller - the coordination controller owning the ledger.
+ * @param entry - the governed agent's ledger entry.
+ * @param token - the reservation this dispatch took.
+ * @param mode - 'subagent' or 'team'.
+ * @param signal - the dispatch's cancellation signal.
+ * @returns a promise resolved once the reservation is released or kept.
+ */
+export async function releaseFailedDispatch(controller, entry, token, mode, signal) {
+  try {
+    await controller.syncMembers(entry, signal);
+  } catch {
+    await entry.budget.rejected(token, false);
+    return;
+  }
+  await entry.budget.rejected(token, true);
+}
+
 /** Public around-dispatch seam: keep native roster, mailbox, task CAS and receipts. */
 export function installAdmission(ctx, controller, governs, trackerOf) {
   return ctx.on('tools/execute', async (exec, next) => {
@@ -136,16 +198,20 @@ export function installAdmission(ctx, controller, governs, trackerOf) {
         const generation = teamCall && id ? tracker.beginDelivery(id) : null;
         let result;
         try { result = await next(); }
-        catch (error) { await entry.budget.rejected(token, false); throw error; }
+        catch (error) { await releaseFailedDispatch(controller, entry, token, mode, exec.signal); throw error; }
         if (result.isError) {
           const safe = PRE_ADMISSION_CODES.has(result.error?.info?.code);
           if (safe && generation !== null) tracker.failDelivery(id, generation, result.error.message);
-          await entry.budget.rejected(token, safe);
+          // A pre-admission refusal provably created nothing. Any other failure
+          // is reconciled against the child catalog instead of being assumed
+          // harmless. Either way the slot goes back.
+          if (safe) await entry.budget.rejected(token, true);
+          else await releaseFailedDispatch(controller, entry, token, mode, exec.signal);
           return result;
         }
         if (exec.name === 'spawn_teammate') id = teams.listMembers(root).find((m) => m.name === label)?.id;
-        else if (exec.name === 'subagent') id = result.value?.agent_id;
-        if (!id) { await entry.budget.rejected(token, false); throw new Error('ADMISSION-RECEIPT: missing accepted member identity'); }
+        else if (exec.name === 'subagent') id = dispatchMemberId(result.value);
+        if (!id) { await releaseFailedDispatch(controller, entry, token, mode, exec.signal); throw new Error('ADMISSION-RECEIPT: missing accepted member identity'); }
         if (teamCall) {
           if (exec.name === 'spawn_teammate') tracker.attachCreate(id);
           else if (result.value?.status === 'accepted') tracker.acceptDelivery(id, generation);
