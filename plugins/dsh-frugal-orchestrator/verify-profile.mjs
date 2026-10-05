@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve, join, basename } from 'node:path';
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { packages, profile, load } from './test-runtime.mjs';
 
@@ -67,8 +67,51 @@ const children = rows(preset.config.plugins);
 const basic = children.find((row) => row.id === 'compaction-basic');
 assert.equal(basic?.config?.auto, false, 'the bridged preset disables the built-in auto compaction');
 assert.ok(children.some((row) => row.name === BRIDGE), 'the preset carries the policy bridge');
+/**
+ * The profile entry that provides the package named `name`, resolved.
+ *
+ * A `link:` dependency is created under its DEPENDENCY KEY, which is not
+ * required to equal the package's own manifest name: this profile installs
+ * `dsh-frugal-orchestrator` and `dsh-compaction-policy` as keys while both
+ * packages are named `@nu11dev/…`. Joining the manifest name onto
+ * `node_modules` therefore found nothing and this script died with a bare
+ * ENOENT before it could check anything it cared about.
+ *
+ * Resolution is by manifest `name` — the key the loader's profile interception
+ * layer actually uses — so the assertion stays on the property that matters:
+ * the profile runs THIS checkout, not a published copy. Both conventional
+ * spellings are tried first and the whole `node_modules` (one scope deep) is
+ * scanned only if neither hits.
+ *
+ * @param name - the package's manifest name.
+ * @returns the realpath of the providing entry, lower-cased for comparison.
+ * @throws when the profile links no package with that name.
+ */
 function linked(name) {
-  return realpathSync(join(profile, 'node_modules', name)).toLowerCase();
+  const modules = join(profile, 'node_modules');
+  const direct = [join(modules, name), join(modules, name.split('/').pop())];
+  for (const candidate of direct) {
+    const manifest = join(candidate, 'package.json');
+    if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).name === name) {
+      return realpathSync(candidate).toLowerCase();
+    }
+  }
+  for (const entry of readdirSync(modules, { withFileTypes: true })) {
+    const names = entry.name.startsWith('@')
+      ? readdirSync(join(modules, entry.name), { withFileTypes: true }).map((child) => join(entry.name, child.name))
+      : [entry.name];
+    for (const relative of names) {
+      const candidate = join(modules, relative);
+      let declared;
+      try {
+        declared = JSON.parse(readFileSync(join(candidate, 'package.json'), 'utf8')).name;
+      } catch {
+        continue; // not a package directory, or an unreadable one
+      }
+      if (declared === name) return realpathSync(candidate).toLowerCase();
+    }
+  }
+  throw new Error(`the profile at ${profile} links no package named ${name} (looked in ${modules}); add it to package.json — a link: entry is fine`);
 }
 const here = fileURLToPath(new URL('.', import.meta.url));
 assert.equal(linked(SELF), realpathSync(here).toLowerCase());
